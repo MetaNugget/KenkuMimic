@@ -136,15 +136,16 @@ for a one-shot session pod that's never resumed.
 - No editing or regenerating notes after they're posted.
 - No live/incremental note updates during the session — batch at session
   end only.
-- **The GPU-side inference server doesn't exist yet.** `selfhosted.js` is a
-  complete, working client against a protocol this project defines (raw
-  16kHz mono PCM16LE in over WebSocket, JSON `{ transcript, final }` out,
-  on port 8000) — but nothing has built the actual (presumably
-  faster-whisper-based) server that needs to run inside the RunPod template
-  `GPU_PROVIDER_TEMPLATE_ID` points at. Until that exists,
-  `TRANSCRIPTION_PROVIDER=selfhosted` will fail at the
-  health-check-polling stage of `/mimic start`. That server is realistically
-  its own small project (Python, Dockerfile, RunPod template setup).
+- **The GPU-side inference server now exists as its own repo**,
+  [KenkuWhisper](../KenkuWhisper) — a Python/FastAPI + faster-whisper server
+  implementing the exact protocol `selfhosted.js` expects (raw 16kHz mono
+  PCM16LE in over WebSocket, JSON `{ transcript, final }` out, on port 8000).
+  See its README for building the image, running it locally against a GPU,
+  and turning it into a RunPod Template. `TRANSCRIPTION_PROVIDER=selfhosted`
+  still needs a Template actually created from that image and
+  `GPU_PROVIDER_TEMPLATE_ID` pointed at it before `/mimic start` will get
+  past the health-check-polling stage — and it hasn't yet been run against
+  live Discord traffic end-to-end.
 - **The orphan-cost safety net is incomplete.** RunPod v2 has no
   server-side max-runtime setting to lean on, so `selfhosted.js`'s
   in-process 6-hour timer is the only backstop — and it only helps if the
