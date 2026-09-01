@@ -84,6 +84,7 @@ async function executeStart(interaction) {
     // "thinking" indicator gets replaced by the real consent announcement
     // once the pipeline is actually live, not before.
     await interaction.deferReply();
+    await interaction.editReply({ content: '🐦‍⬛ Heard you — gathering the flock for this session...' });
 
     sessionId = await transcriptStore.createSession({
       guildId,
@@ -99,7 +100,12 @@ async function executeStart(interaction) {
         .catch((err) => console.error(`[mimic] failed to append transcript line for session ${sessionId}:`, err.message));
     });
 
-    await adapter.connect();
+    // Technical, not kenku-flavored — during a slow or failing GPU cold
+    // start these edits are the diagnostic trail: if the pipeline never
+    // comes up, whichever stage this message is frozen on is where it
+    // stalled. The final editReply below drops back into kenku flavor once
+    // the pipeline is actually live.
+    await adapter.connect((stage) => interaction.editReply({ content: stage }).catch(() => {}));
 
     const voiceCapture = await startCapture({
       channel: voiceChannel,
