@@ -1,7 +1,7 @@
 require('dotenv').config();
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits, MessageFlags } = require('discord.js');
 const sessionState = require('./lib/sessionState');
 
 const token = process.env.TOKEN;
@@ -43,7 +43,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await command.execute(interaction);
   } catch (error) {
     console.error(error);
-    const errorReply = { content: '🐦‍⬛ Something in the flock went sideways — try that again in a bit.', ephemeral: true };
+    const errorReply = { content: '🐦‍⬛ Something in the flock went sideways — try that again in a bit.', flags: MessageFlags.Ephemeral };
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp(errorReply);
     } else {

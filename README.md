@@ -8,7 +8,13 @@ session notes once the session wraps up.
 
 1. `/mimic start` — joins the voice channel the caller is currently in,
    posts a public announcement in the text channel (this *is* the consent
-   notice — recording is never silent), and starts transcribing.
+   notice — recording is never silent), and starts transcribing. The voice
+   channel itself also gets a persistent status (`🐦‍⬛ Recording for session
+   notes`, cleared on `/mimic end` or an auto-end) so anyone who joins the
+   channel *after* the announcement still sees it — the text announcement
+   alone only reaches whoever was already looking when it posted. Needs the
+   bot to have the "Set Voice Channel Status" permission; missing it just
+   logs a warning rather than blocking session start.
 2. Each person's audio is captured and transcribed separately as they
    speak. Discord already separates audio per speaker, so there's no
    diarization step and speaker attribution is exact, including when
@@ -94,7 +100,7 @@ integration:
   with cold-start time and uptime varying by host machine.
 
 Built against **RunPod's REST API v2** (`https://api.runpod.io/v2`,
-`Authorization: Bearer <key>`) — v1 retired 2026-11-15. `stopInstance()`
+`Authorization: Bearer <key>`) — v1 retires December 1, 2026. `stopInstance()`
 uses RunPod's `terminate` action specifically, not `stop`: RunPod's own
 `stop` only pauses compute and keeps billing for storage, which is wrong
 for a one-shot session pod that's never resumed.
