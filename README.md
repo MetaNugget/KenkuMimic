@@ -31,6 +31,28 @@ session notes once the session wraps up.
    notes generation fails, it's kept (with a 48h safety expiry) instead of
    lost, so a bad API call doesn't destroy the only copy of the session.
 
+## Data sent to third parties
+
+A disclosure for the people being recorded, separate from the in-Discord consent
+notice above — worth reading before running a session with anyone new.
+
+- **Audio → speech-to-text**, depending on `TRANSCRIPTION_PROVIDER`:
+  - `deepgram` — raw audio streams to Deepgram's real-time API
+    (deepgram.com).
+  - `assemblyai` — raw audio streams to AssemblyAI's real-time API
+    (assemblyai.com).
+  - `selfhosted` — raw audio streams to a GPU pod this project provisions on
+    RunPod (runpod.io), running [KenkuWhisper](../KenkuWhisper) — code this
+    project controls, but RunPod is still the infrastructure processing it.
+- **Transcript → session notes.** Whichever chat-completions endpoint
+  `NOTES_BASE_URL` points at receives the full session transcript to
+  generate notes — commonly Anthropic, OpenAI, or a self-hosted
+  Ollama/llama.cpp server, depending on how it's configured.
+
+Both are required config with no default, so whoever deployed this instance of
+the bot has already chosen which providers apply — check the deployment's
+`.env` (not committed to this repo) to know which ones for sure.
+
 ## Architecture
 
 - **Redis-backed transcript, in-memory everything else.** Unlike the

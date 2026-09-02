@@ -57,17 +57,65 @@ test('a speaker whose connection fails to open retries on the next chunk', async
 
   async function closeConnection() {}
 
-  // Short trailing-silence window so the failed attempt's own silence timer
-  // (set before openConnection's outcome is known) doesn't linger for the
-  // default 1500ms and log a stray "error closing connection" line once it
-  // fires against the already-rejected connPromise.
-  const pool = createSpeakerPool({ openConnection, closeConnection }, { trailingSilenceMs: 10 });
+  // Default trailingSilenceMs is fine here: the rejection handler clears
+  // the failed attempt's own silence timer synchronously (see the timer-
+  // guard regression test below), so it no longer lingers after the entry
+  // is gone.
+  const pool = createSpeakerPool({ openConnection, closeConnection });
 
   await assert.rejects(() => pool.send('speaker-1', 'a'));
   await pool.send('speaker-1', 'b');
 
   assert.equal(attempt, 2);
   assert.deepEqual(sent, ['b']);
+
+  await pool.closeAll();
+});
+
+test("a failed attempt's stale silence timer does not evict a healthy retry", async () => {
+  const trailingSilenceMs = 200;
+  let openCalls = 0;
+  const sent = [];
+  const closedConns = [];
+
+  async function openConnection() {
+    openCalls++;
+    if (openCalls === 1) {
+      throw new Error('simulated handshake failure');
+    }
+    const conn = {
+      send(chunk) {
+        sent.push(chunk);
+      },
+    };
+    return conn;
+  }
+
+  async function closeConnection(conn) {
+    closedConns.push(conn);
+  }
+
+  const pool = createSpeakerPool({ openConnection, closeConnection }, { trailingSilenceMs });
+
+  // entry1 fails; its silence timer was scheduled (then should have been
+  // cleared by the rejection handler) at roughly t=0.
+  await assert.rejects(() => pool.send('speaker-1', 'a'));
+  // entry2 (healthy) is created immediately after, at roughly t=0 too.
+  await pool.send('speaker-1', 'b');
+
+  // Keep entry2 alive with sends spaced well under trailingSilenceMs, for
+  // well past the point where entry1's silence timer would originally have
+  // fired (t=200ms) -- if that stale timer weren't cleared, it would
+  // unconditionally delete whatever occupies this speakerId by then, which
+  // is entry2, actively in use.
+  for (let i = 0; i < 4; i++) {
+    await delay(60);
+    await pool.send('speaker-1', `chunk-${i}`);
+  }
+
+  assert.equal(openCalls, 2); // never evicted and re-opened a third connection
+  assert.equal(closedConns.length, 0); // the healthy connection was never closed
+  assert.deepEqual(sent, ['b', 'chunk-0', 'chunk-1', 'chunk-2', 'chunk-3']);
 
   await pool.closeAll();
 });

@@ -32,6 +32,14 @@ async function setVoiceChannelStatus(client, channelId, status) {
 const IDLE_END_MINUTES = Number(process.env.MIMIC_IDLE_TIMEOUT_MINUTES) || 15;
 const IDLE_END_MS = IDLE_END_MINUTES * 60 * 1000;
 
+// How often the idle watch checks elapsed silence, not how precisely it
+// fires — onPcmChunk arrives ~50 times/sec per speaker, so tracking
+// `lastAudioAt` as a plain field write there and checking it from one
+// interval per session (instead of a clearTimeout+setTimeout+unref on every
+// chunk) is a lot cheaper on a 2GB Pi already running three bots, at the
+// cost of the auto-end firing up to this long after the true deadline.
+const IDLE_CHECK_INTERVAL_MS = 30_000;
+
 // transcriptStore deliberately stores raw Discord user IDs, not names (see
 // its own comment) — resolving them to display names needs a guild member
 // lookup, which belongs here, not in a Discord-API-free store module. A
@@ -118,7 +126,7 @@ async function autoEndSession(guildId, client, guild, noticeText) {
   const session = sessionState.getSession(guildId);
   if (!session) return; // already ended, e.g. raced with a manual /mimic end
   sessionState.endSession(guildId);
-  clearTimeout(session.idleTimer);
+  clearInterval(session.idleTimer);
 
   const textChannel = await client.channels.fetch(session.textChannelId).catch((err) => {
     console.error(`[mimic] failed to fetch text channel for guild ${guildId} auto-end:`, err.message);
@@ -154,21 +162,24 @@ async function autoEndSession(guildId, client, guild, noticeText) {
   await transcriptStore.deleteSession(session.sessionId);
 }
 
-// Resets the "nobody's spoken in a while" clock — called once right after a
-// session comes up (so total silence still eventually ends it) and again on
-// every PCM chunk from any speaker.
-function scheduleIdleEnd(guildId, client, guild) {
+// Started once right after a session comes up. onPcmChunk just stamps
+// session.lastAudioAt on every chunk (a plain field write); this interval is
+// the only thing that ever reads it and decides whether to end the session.
+function startIdleWatch(guildId, client, guild) {
   const session = sessionState.getSession(guildId);
   if (!session) return;
-  clearTimeout(session.idleTimer);
-  session.idleTimer = setTimeout(() => {
+  session.lastAudioAt = Date.now();
+  session.idleTimer = setInterval(() => {
+    const current = sessionState.getSession(guildId);
+    if (!current) return; // already ended some other way
+    if (Date.now() - current.lastAudioAt < IDLE_END_MS) return;
     autoEndSession(
       guildId,
       client,
       guild,
       `🐦‍⬛ No one's said anything in ${IDLE_END_MINUTES} minutes — the flock is calling it and wrapping up the session automatically.`,
     ).catch((err) => console.error(`[mimic] idle auto-end failed for guild ${guildId}:`, err.message));
-  }, IDLE_END_MS);
+  }, IDLE_CHECK_INTERVAL_MS);
   session.idleTimer.unref?.();
 }
 
@@ -235,7 +246,8 @@ async function executeStart(interaction) {
     const voiceCapture = await startCapture({
       channel: voiceChannel,
       onPcmChunk: (pcmChunk, speakerId) => {
-        scheduleIdleEnd(guildId, interaction.client, voiceChannel.guild);
+        const session = sessionState.getSession(guildId);
+        if (session) session.lastAudioAt = Date.now();
         adapter
           .sendAudio(pcmChunk, speakerId)
           .catch((err) => console.error(`[mimic] failed to send audio for speaker ${speakerId}:`, err.message));
@@ -251,7 +263,7 @@ async function executeStart(interaction) {
     });
 
     sessionState.finalizeSession(guildId, { sessionId, voiceCapture, transcriptionAdapter: adapter });
-    scheduleIdleEnd(guildId, interaction.client, voiceChannel.guild);
+    startIdleWatch(guildId, interaction.client, voiceChannel.guild);
     await setVoiceChannelStatus(interaction.client, voiceChannel.id, RECORDING_VOICE_STATUS);
 
     await interaction.editReply({
@@ -280,7 +292,7 @@ async function executeEnd(interaction) {
   // a second /mimic end landing concurrently must not tear down (or
   // double-bill notesClient for) the same session twice.
   sessionState.endSession(guildId);
-  clearTimeout(session.idleTimer);
+  clearInterval(session.idleTimer);
 
   await interaction.deferReply();
 
